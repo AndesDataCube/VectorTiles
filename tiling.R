@@ -17,6 +17,7 @@ library(tidyverse)
 library(raster)
 library(rgee)
 
+
 # Initialize GEE
 ee_Initialize("julio.contreras1@unmsm.edu.pe", drive = TRUE, gcs = T)
 
@@ -69,7 +70,7 @@ globalGrid.sf <-
   ) %>%
   st_as_sf()
 
-# grid over countries
+# Grid over countries
 index <-
   st_intersects(
     x = globalGrid.sf,
@@ -78,20 +79,56 @@ index <-
   ) %>%
   as.logical()
 
-grid.sf <-
-  mutate(globalGrid.sf, status = index) %>%
-  dplyr::filter(status == TRUE) %>%
-  st_centroid() %>%
-  st_buffer(
-    dist = size.buffer,
-    endCapStyle = "SQUARE"
-  ) %>%
-  st_transform(crs = "EPSG:4326")
+# Create and manipulate grid spatial dataframe
+grid.sf <- mutate(globalGrid.sf, status = index) %>%
+           dplyr::filter(status == TRUE) %>%
+           st_centroid() %>%
+           st_buffer(
+             dist = size.buffer,
+             endCapStyle = "SQUARE"
+           ) %>%
+           st_transform(crs = "EPSG:4326")
 
-mapview::mapview(grid.sf)
 
+# Write grid to geopackage as layer "tiling"
 st_write(
   obj = grid.sf, 
   dsn = "data/vector/dbase.gpkg",
   layer = "tiling"
+)
+
+# Read countries from geopackage
+Countries <- st_read(
+  dsn = "data/vector/dbase.gpkg",
+  layer = "countries"
+)
+
+# Read tiles from geopackage
+Tiles <- st_read(
+  dsn = "data/vector/dbase.gpkg",
+  layer = "tiling"
+)
+
+# Calculate centroids and join with countries
+Tiles_centroidsT <- st_centroid(Tiles) %>%
+                    st_join(Countries, join = st_within) %>%
+                    st_transform(crs = 32718)
+
+# Calculate IDs for tiles based on coordinates
+TilesC <- Tiles %>%
+          mutate(
+                 Country = Tiles_centroidsT$CNTR_ID,
+                 Row = round(((CoordT[,2] - min(CoordT[,2])) / size.grid) + 1),
+                 Path = round(((CoordT[,1] - min(CoordT[,1])) / size.grid) + 1)) %>%
+          unite("ID", Country, Row, Path, sep = "") %>%
+          st_transform(crs = "EPSG:4326")
+       
+# Display grid on interactive map
+mapview::mapview(TilesC)   
+
+# Write tiles with IDs to geopackage as layer "tiling_id"
+st_write(
+  obj = TilesC, 
+  dsn = "data/vector/dbase.gpkg",
+  layer = "tiling_id"
 )
